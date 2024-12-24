@@ -1,8 +1,9 @@
 {
 	"name": "faccina",
-	"version": "2.0.0-alpha.50",
+	"version": "2.0.0-alpha.51",
 	"private": true,
 	"scripts": {
+		"prepare": "svelte-kit sync",
 		"dev": "bunx --bun vite dev",
 		"build": "bunx --bun vite build",
 		"preview": "bunx --bun vite preview",
@@ -30,7 +31,6 @@
 		"@types/pg": "^8.11.10",
 		"@types/prompts": "^2.4.9",
 		"@types/ramda": "^0.30.2",
-		"@types/streamsaver": "^2.0.5",
 		"@types/string-pixel-width": "^1.10.3",
 		"@types/xml2js": "^0.4.14",
 		"autoprefixer": "^10.4.20",
@@ -111,19 +111,21 @@
 		"tailwind-merge": "^2.5.5",
 		"tailwind-variants": "^0.2.1",
 		"ts-pattern": "^5.6.0",
+		"type-fest": "^4.30.2",
 		"xml2js": "^0.6.2",
 		"yaml": "^2.6.1",
 		"zod": "^3.24.1",
 		"zod-urlsearchparams": "^0.0.14"
 	},
 	"patchedDependencies": {
-		"kysely@0.27.4": "patches/kysely@0.27.4.patch",
 		"@types/string-pixel-width@1.10.3": "patches/@types%2Fstring-pixel-width@1.10.3.patch",
 		"svelte-adapter-bun@0.5.2": "patches/svelte-adapter-bun@0.5.2.patch",
 		"kysely-ctl@0.9.0": "patches/kysely-ctl@0.9.0.patch",
 		"@ethercorps/sveltekit-og@3.0.0": "patches/@ethercorps%2Fsveltekit-og@3.0.0.patch",
 		"xml2js@0.6.2": "patches/xml2js@0.6.2.patch",
-		"@types/xml2js@0.4.14": "patches/@types%2Fxml2js@0.4.14.patch"
+		"@types/xml2js@0.4.14": "patches/@types%2Fxml2js@0.4.14.patch",
+		"kysely@0.27.5": "patches/kysely@0.27.5.patch",
+		"sharp@0.33.5": "patches/sharp@0.33.5.patch"
 	},
 	"trustedDependencies": [
 		"@sveltejs/kit",

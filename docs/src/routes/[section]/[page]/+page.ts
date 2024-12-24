@@ -3,11 +3,10 @@ import type { Component, SvelteComponent } from 'svelte';
 
 export const load = async ({ params }) => {
 	try {
-		const doc: { default: Component } = await import(
-			`../../../../pages/${params.section}/${params.page}.md`
-		);
+		const { default: Content, metadata }: { default: Component; metadata: { title: string } } =
+			await import(`../../../../pages/${params.section}/${params.page}.md`);
 
-		return { Content: doc.default };
+		return { Content, metadata };
 	} catch {
 		error(404, { message: 'Page not found' });
 	}

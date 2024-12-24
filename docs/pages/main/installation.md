@@ -3,6 +3,11 @@ order: 1
 title: Installation
 ---
 
+<script context="module">
+  import { base } from "$app/paths";
+  import CodeBlock from '$lib/components/CodeBlock.svelte'
+</script>
+
 # {title}
 
 ## Pre-requisites
@@ -21,15 +26,12 @@ You will first need to get the source code since it includes the app itself and 
 
 Open a terminal in the root of the repository, where the `package.json` file is located and, with Bun already installed, run `bun install`. This will install all the necessary dependencies.
 
-Now, make a copy of the example configuration file and name it `config.toml`. This includes the basics for the app to work. For a more in-depth explanation of the configuration, check [this page](/main/config).
+Now, make a copy of the example configuration file and name it `config.toml`. This includes the basics for the app to work. For a more in-depth explanation of the configuration, check [this page]({base}/main/config).
 
 ```toml
-[site]
-site_name = 'Faccina'
-
 [directories]
-content = "./content"
-images = "./images"
+content = './content'
+images = './images'
 
 [database]
 vendor = 'sqlite'
@@ -68,4 +70,4 @@ Now, run `docker compose up` to start everything. It will be available at `0.0.0
 
 ## Next step
 
-You can now go through the rest of the configuration [here](/main/config) or you can start by learning [how to index archives](/cli/index-archives).
+You can now go through the rest of the configuration [here]({base}/main/config) or you can start by learning [how to index archives]({base}/cli/index-archives).
