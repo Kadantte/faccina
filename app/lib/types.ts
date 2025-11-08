@@ -144,6 +144,7 @@ export type SiteConfig = {
 		deleteRequireConfirmation: boolean;
 	};
 	galleryShowAllPreviews: boolean;
+	galleryAutoLoadMorePreviews: boolean;
 };
 
 export const readStatSchema = z.object({

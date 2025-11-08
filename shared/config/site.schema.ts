@@ -57,6 +57,7 @@ const listingSchema = z
 
 const gallerySchema = z.object({
 	show_all_previews: z.boolean().default(false),
+	auto_load_more_previews: z.boolean().default(false),
 });
 
 const schema = z.object({

@@ -25,6 +25,7 @@ export const load = ({ locals }) => {
 				deleteRequireConfirmation: config.site.admin.deleteRequireConfirmation,
 			},
 			galleryShowAllPreviews: config.site.gallery.showAllPreviews,
+			galleryAutoLoadMorePreviews: config.site.gallery.autoLoadMorePreviews,
 		} satisfies SiteConfig,
 	};
 };
