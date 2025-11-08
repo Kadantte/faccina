@@ -143,6 +143,7 @@ export type SiteConfig = {
 	admin: {
 		deleteRequireConfirmation: boolean;
 	};
+	galleryShowAllPreviews: boolean;
 };
 
 export const readStatSchema = z.object({

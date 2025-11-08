@@ -133,7 +133,7 @@ program
 	.command('metadata:scrape')
 	.description('Scrape metadata from specified site.')
 	.addArgument(new Argument('<site>', 'Site to scrape metadata from.').choices(['hentag']))
-	.addOption(new Option('--ids <ID ranges>', 'Re-index given archive IDs.'))
+	.addOption(new Option('--ids <ID ranges>', 'Scrape given archive ID ranges.'))
 	.addOption(new Option('--paths <paths...>', 'List of paths to limit search to.'))
 	.option(
 		'--sleep <time>',

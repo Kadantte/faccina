@@ -55,6 +55,10 @@ const listingSchema = z
 			: val.tag_exclude,
 	}));
 
+const gallerySchema = z.object({
+	show_all_previews: z.boolean().default(false),
+});
+
 const schema = z.object({
 	site_name: z.string().default('Faccina'),
 	url: z.string().default(''),
@@ -78,6 +82,7 @@ const schema = z.object({
 		})
 		.default({}),
 	gallery_listing: listingSchema.default({}),
+	gallery: gallerySchema.default({}),
 });
 
 export default schema;

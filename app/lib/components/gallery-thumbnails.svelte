@@ -9,7 +9,9 @@
 
 	let maxCount = 12;
 
-	$: filteredImages = archive?.images.slice(0, maxCount);
+	$: filteredImages = $siteConfig.galleryShowAllPreviews
+		? archive.images
+		: archive?.images.slice(0, maxCount);
 
 	$: wideImages =
 		archive.images.reduce(
@@ -32,7 +34,7 @@
 							isSpread(image) && 'object-contain'
 						)}
 						height={455}
-						loading="eager"
+						loading="lazy"
 						src={`${$siteConfig.imageServer}/image/${archive.hash}/${image.pageNumber}?type=thumb`}
 						width={320}
 					/>
@@ -48,12 +50,14 @@
 		</div>
 	</div>
 
-	{#if filteredImages.length < archive.images.length}
-		<div class="grid grid-cols-2 gap-2">
-			<Button on:click={() => (maxCount += 12)} variant="indigo-outline">Show more</Button>
-			<Button on:click={() => (maxCount = archive.images.length)} variant="blue-outline">
-				Show all
-			</Button>
-		</div>
+	{#if !$siteConfig.galleryShowAllPreviews}
+		{#if filteredImages.length < archive.images.length}
+			<div class="grid grid-cols-2 gap-2">
+				<Button on:click={() => (maxCount += 12)} variant="indigo-outline">Show more</Button>
+				<Button on:click={() => (maxCount = archive.images.length)} variant="blue-outline">
+					Show all
+				</Button>
+			</div>
+		{/if}
 	{/if}
 </div>
