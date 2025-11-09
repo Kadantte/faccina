@@ -22,6 +22,7 @@ const schema = z
 		download_default_preset: z.string().optional(),
 		download_allow_original: z.boolean().default(true),
 		store_resampled_images: z.boolean().default(true),
+		reader_calculate_dimensions: z.boolean().default(true),
 		caching: z
 			.union([z.boolean(), z.number(), cachingSchema])
 			.optional()

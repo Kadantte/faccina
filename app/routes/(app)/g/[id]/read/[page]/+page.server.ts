@@ -34,7 +34,7 @@ export const load = async ({ params, locals, cookies }) => {
 		redirect(301, `/g/${params.id}/read/${gallery.pages}`);
 	}
 
-	if (gallery.images.length) {
+	if (config.image.readerCalculateDimensions && gallery.images.length) {
 		const filteredImages = gallery.images.filter(
 			(image) => image.width === null || image.height === null
 		);
