@@ -26,6 +26,8 @@ export const load = ({ locals }) => {
 			},
 			galleryShowAllPreviews: config.site.gallery.showAllPreviews,
 			galleryAutoLoadMorePreviews: config.site.gallery.autoLoadMorePreviews,
+			galleryPreviewsCount: config.site.gallery.previewsCount,
+			downloadArchiveExtension: config.server.downloadArchiveExtension,
 		} satisfies SiteConfig,
 	};
 };

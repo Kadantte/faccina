@@ -77,7 +77,7 @@
 			const url = URL.createObjectURL(blob);
 			const anchor = document.createElement('a');
 			anchor.href = url;
-			anchor.download = `${generateFilename(gallery.title, gallery.tags)}.cbz`;
+			anchor.download = `${generateFilename(gallery.title, gallery.tags)}.${$siteConfig.downloadArchiveExtension}`;
 			anchor.click();
 			URL.revokeObjectURL(url);
 		};

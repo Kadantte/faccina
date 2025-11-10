@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { type Order, type Sort } from './schemas';
+import type { serverSchema } from '~shared/config.schema';
 
 export type TagNamespace =
 	| 'artist'
@@ -145,6 +146,8 @@ export type SiteConfig = {
 	};
 	galleryShowAllPreviews: boolean;
 	galleryAutoLoadMorePreviews: boolean;
+	galleryPreviewsCount: number;
+	downloadArchiveExtension: z.infer<typeof serverSchema>['download_archive_extension'];
 };
 
 export const readStatSchema = z.object({

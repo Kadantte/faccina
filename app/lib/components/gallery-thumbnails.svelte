@@ -10,7 +10,7 @@
 
 	let buttonsContainer: HTMLDivElement | null;
 
-	let maxCount = 12;
+	let maxCount = $siteConfig.galleryPreviewsCount;
 
 	$: filteredImages = $siteConfig.galleryShowAllPreviews
 		? archive.images
@@ -37,7 +37,7 @@
 			rect.right <= (window.innerWidth || document.documentElement.clientWidth);
 
 		if (isInViewport && maxCount < archive.images.length) {
-			maxCount += 12;
+			maxCount += $siteConfig.galleryPreviewsCount;
 			setTimeout(checkVisibility, 100);
 		}
 	};
@@ -80,7 +80,9 @@
 	{#if !$siteConfig.galleryShowAllPreviews}
 		{#if filteredImages.length < archive.images.length}
 			<div bind:this={buttonsContainer} class="grid grid-cols-2 gap-2">
-				<Button on:click={() => (maxCount += 12)} variant="indigo-outline">Show more</Button>
+				<Button on:click={() => (maxCount += $siteConfig.galleryPreviewsCount)} variant="indigo-outline">
+					Show more
+				</Button>
 				<Button on:click={() => (maxCount = archive.images.length)} variant="blue-outline">
 					Show all
 				</Button>

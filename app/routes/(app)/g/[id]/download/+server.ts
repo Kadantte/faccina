@@ -26,7 +26,7 @@ export const GET = async ({ params, locals, fetch, setHeaders }) => {
 
 	setHeaders({
 		'Content-Type': 'application/zip',
-		'Content-Disposition': `attachment;filename=${encodeURIComponent(generateFilename(gallery.title, gallery.tags))}.cbz`,
+		'Content-Disposition': `attachment;filename=${encodeURIComponent(generateFilename(gallery.title, gallery.tags))}.${config.server.downloadArchiveExtension}`,
 	});
 
 	const zip = new Zip();

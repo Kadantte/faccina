@@ -51,6 +51,7 @@ export const databaseSchema = z.discriminatedUnion('vendor', [
 export const serverSchema = z.object({
 	logging: z.union([z.boolean(), z.string()]).default(true),
 	auto_unpack: z.boolean().default(false),
+	download_archive_extension: z.enum(['zip', 'cbz']).default('cbz'),
 });
 
 export const mailerSchema = z.object({
