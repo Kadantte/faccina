@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ExpressionWrapper, type SelectQueryBuilder, type SqlBool } from 'kysely';
-import type { DB } from '../shared/types';
+import type { DB } from '../shared/db/types';
 
 export const parseIdRanges = (str: string) => {
 	const idRanges = str.split(',');
@@ -103,4 +103,14 @@ export const readStream = async (stream: NodeJS.ReadableStream) => {
 	}
 
 	return Buffer.concat(chunks);
+};
+
+export const basenames = (path: string, ...suffix: string[]) => {
+	let name = basename(path);
+
+	for (const s of suffix) {
+		name = basename(name, s);
+	}
+
+	return name;
 };

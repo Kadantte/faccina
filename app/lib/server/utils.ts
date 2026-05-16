@@ -8,25 +8,12 @@ import type { GalleryListItem, Tag } from '../types';
 import config from '~shared/config';
 import { orderSchema, sortSchema, type Order, type Sort } from '$lib/schemas';
 
-export const handleTags = (archive: GalleryListItem): GalleryListItem => {
+export const handleTags = (tags: Tag[]): Tag[] => {
 	const { tagExclude, tagWeight } = config.site.galleryListing;
 
-	const filteredTags = archive.tags.filter((tag) => {
+	const filteredTags = tags.filter((tag) => {
 		return !tagExclude.some(({ ignoreCase, name, namespace }) => {
-			const normalizedTagName = ignoreCase ? tag.name.toLowerCase() : tag.name;
-			const normalizedNames = ignoreCase ? name.map((t) => t.toLowerCase()) : name;
-
-			if (namespace) {
-				return namespace === tag.namespace && normalizedNames.includes(normalizedTagName);
-			} else {
-				return normalizedNames.includes(normalizedTagName);
-			}
-		});
-	});
-
-	const sortedTags = filteredTags.sort((a, b) => {
-		const getWeight = (tag: Tag) => {
-			const matchTag = tagWeight.find(({ ignoreCase, name, namespace }) => {
+			if (name) {
 				const normalizedTagName = ignoreCase ? tag.name.toLowerCase() : tag.name;
 				const normalizedNames = ignoreCase ? name.map((t) => t.toLowerCase()) : name;
 
@@ -34,6 +21,27 @@ export const handleTags = (archive: GalleryListItem): GalleryListItem => {
 					return namespace === tag.namespace && normalizedNames.includes(normalizedTagName);
 				} else {
 					return normalizedNames.includes(normalizedTagName);
+				}
+			} else if (namespace) {
+				return namespace === tag.namespace;
+			}
+		});
+	});
+
+	const sortedTags = filteredTags.sort((a, b) => {
+		const getWeight = (tag: Tag) => {
+			const matchTag = tagWeight.find(({ ignoreCase, name, namespace }) => {
+				if (name) {
+					const normalizedTagName = ignoreCase ? tag.name.toLowerCase() : tag.name;
+					const normalizedNames = ignoreCase ? name.map((t) => t.toLowerCase()) : name;
+
+					if (namespace) {
+						return namespace === tag.namespace && normalizedNames.includes(normalizedTagName);
+					} else {
+						return normalizedNames.includes(normalizedTagName);
+					}
+				} else if (namespace) {
+					return namespace === tag.namespace;
 				}
 			});
 
@@ -46,8 +54,11 @@ export const handleTags = (archive: GalleryListItem): GalleryListItem => {
 		return aWeight === bWeight ? a.name.localeCompare(b.name) : bWeight - aWeight;
 	});
 
-	archive.tags = sortedTags;
+	return sortedTags;
+};
 
+export const sortArchiveTags = (archive: GalleryListItem): GalleryListItem => {
+	archive.tags = handleTags(archive.tags);
 	return archive;
 };
 
@@ -59,6 +70,10 @@ export const searchSchema = z
 		order: orderSchema.optional(),
 		limit: z.coerce.number().int().catch(24),
 		seed: z.string().optional(),
+		series: z
+			.string()
+			.optional()
+			.transform((val) => (val === 'true' || val === '1' ? true : false)),
 		ids: z
 			.string()
 			.transform((str) =>
@@ -100,10 +115,42 @@ export const log = (message: string) => {
 		return;
 	}
 
-	message = `${message} - ${chalk.cyan(`${dayjs().format('YYYY-MM-DD HH:mm:ss')}`)}`;
+	message = `${message} - ${chalk.cyan(`${dayjs().format('YYYY-MM-DD HH:mm:ss')}`)} ${chalk.gray(`[PID: ${process.pid}]`)}`;
 	console.debug(message);
 
 	if (typeof config.server.logging === 'string') {
-		appendFile(config.server.logging, stripAnsi(message) + '\n');
+		try {
+			appendFile(config.server.logging, stripAnsi(message) + '\n');
+		} catch {
+			/* empty */
+		}
 	}
+};
+
+export const readReadableStream = async (stream: NodeJS.ReadableStream, size?: number) => {
+	stream.read(size);
+	return new Promise<Buffer>((resolve, reject) => {
+		stream.once('readable', () => {
+			const data = stream.read(size) as Buffer | null;
+
+			if (data) {
+				resolve(data);
+			}
+		});
+		stream.on('error', (err) => reject(err));
+	});
+};
+
+export const readStream = async (stream: NodeJS.ReadableStream) => {
+	const chunks: Buffer[] = [];
+
+	for await (const chunk of stream) {
+		if (typeof chunk === 'string') {
+			continue;
+		}
+
+		chunks.push(chunk);
+	}
+
+	return Buffer.concat(chunks);
 };

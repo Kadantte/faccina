@@ -1,5 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { libraryItems, search } from '$lib/server/db/queries';
+import { libraryItems, searchArchives } from '$lib/server/db/queries';
 import { parseSearchParams } from '$lib/server/utils';
 import { randomString } from '$lib/utils';
 import config from '~shared/config';
@@ -7,7 +7,9 @@ import db from '~shared/db';
 import { jsonArrayFrom } from '~shared/db/helpers';
 
 export const load = async ({ params, url, locals }) => {
-	if (!locals.user || !config.site.enableCollections) {
+	if (!locals.user) {
+		redirect(301, `/login?to=/collections/${params.slug}`);
+	} else if (!config.site.enableCollections) {
 		redirect(301, '/');
 	}
 
@@ -54,7 +56,7 @@ export const load = async ({ params, url, locals }) => {
 		});
 	}
 
-	const { ids, total } = await search(searchParams, {
+	const { ids, total } = await searchArchives(searchParams, {
 		showHidden: !!locals.user?.admin,
 		matchIds: collection.archives.map((archive) => archive.archiveId),
 	});
@@ -62,7 +64,7 @@ export const load = async ({ params, url, locals }) => {
 	return {
 		collection,
 		libraryPage: {
-			archives: await libraryItems(ids, {
+			data: await libraryItems(ids, {
 				sortingIds:
 					sort === 'collection_order'
 						? collection.archives.map((archive) => archive.archiveId)
@@ -77,18 +79,8 @@ export const load = async ({ params, url, locals }) => {
 
 export const actions = {
 	remove: async ({ params, locals }) => {
-		if (!locals.user) {
-			return fail(400, {
-				message: 'You are not logged in',
-				type: 'error',
-			});
-		}
-
-		if (!config.site.enableCollections) {
-			return fail(400, {
-				message: 'Collections are not enabled',
-				type: 'error',
-			});
+		if (!locals.user?.admin) {
+			return fail(403, { message: 'You are not allowed to perform this action', type: 'error' });
 		}
 
 		const slug = params.slug;

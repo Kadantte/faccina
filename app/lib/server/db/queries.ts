@@ -1,24 +1,35 @@
 import chalk from 'chalk';
-import { type Expression, type OrderByExpression, sql, type SqlBool } from 'kysely';
+import {
+	type Expression,
+	type OrderByExpression,
+	type SelectQueryBuilder,
+	sql,
+	type SqlBool,
+} from 'kysely';
 import naturalCompare from 'natural-compare-lite';
 import { z } from 'zod';
-import { handleTags, log, type SearchParams } from '../utils';
+import { log, type SearchParams, sortArchiveTags } from '../utils';
 import { type Order, type Sort } from '$lib/schemas';
 import type { Archive, Collection, Gallery, GalleryListItem, Tag } from '$lib/types';
 import { shuffle } from '$lib/utils';
 import config from '~shared/config';
 import db from '~shared/db';
 import { jsonArrayFrom, like } from '~shared/db/helpers';
-import type { DB } from '~shared/types';
+import type { DB } from '~shared/db/types';
 
 export type QueryOptions = {
 	showHidden?: boolean;
 	matchIds?: number[];
 	sortingIds?: number[];
 	tagBlacklist?: string[];
+	skipPagination?: boolean;
+	skipHandlingTags?: boolean;
 };
 
-export const getGallery = (id: number, options: QueryOptions): Promise<Gallery | undefined> => {
+export const getGallery = (
+	id: number,
+	options: Pick<QueryOptions, 'showHidden'>
+): Promise<Gallery | undefined> => {
 	let query = db
 		.selectFrom('archives')
 		.select((eb) => [
@@ -37,7 +48,7 @@ export const getGallery = (id: number, options: QueryOptions): Promise<Gallery |
 				eb
 					.selectFrom('archiveTags')
 					.innerJoin('tags', 'id', 'tagId')
-					.select(['id', 'namespace', 'name', 'displayName'])
+					.select(['namespace', 'name'])
 					.whereRef('archives.id', '=', 'archiveId')
 					.orderBy('archiveTags.createdAt asc')
 			).as('tags'),
@@ -56,6 +67,13 @@ export const getGallery = (id: number, options: QueryOptions): Promise<Gallery |
 					.whereRef('archives.id', '=', 'archiveId')
 					.orderBy('archiveSources.createdAt asc')
 			).as('sources'),
+			jsonArrayFrom(
+				eb
+					.selectFrom('seriesArchive')
+					.innerJoin('series', 'series.id', 'seriesArchive.seriesId')
+					.select(['series.id', 'series.title'])
+					.whereRef('archives.id', '=', 'archiveId')
+			).as('series'),
 		])
 		.where('id', '=', id);
 
@@ -79,15 +97,15 @@ export const getArchive = (id: number): Promise<Archive | undefined> => {
 			'thumbnail',
 			'language',
 			'size',
+			'protected',
 			'createdAt',
 			'releasedAt',
 			'deletedAt',
-			'protected',
 			jsonArrayFrom(
 				eb
 					.selectFrom('archiveTags')
 					.innerJoin('tags', 'id', 'tagId')
-					.select(['id', 'namespace', 'name', 'displayName'])
+					.select(['namespace', 'name'])
 					.whereRef('archives.id', '=', 'archiveId')
 					.orderBy('archiveTags.createdAt asc')
 			).as('tags'),
@@ -105,6 +123,13 @@ export const getArchive = (id: number): Promise<Archive | undefined> => {
 					.whereRef('archives.id', '=', 'archiveId')
 					.orderBy('archiveSources.createdAt asc')
 			).as('sources'),
+			jsonArrayFrom(
+				eb
+					.selectFrom('seriesArchive')
+					.innerJoin('series', 'series.id', 'seriesArchive.seriesId')
+					.select(['series.title', 'seriesArchive.order'])
+					.whereRef('seriesArchive.archiveId', '=', 'archives.id')
+			).as('series'),
 		])
 		.where('id', '=', id)
 		.executeTakeFirst();
@@ -118,6 +143,8 @@ type TagMatch = {
 };
 
 export const parseQuery = (query: string) => {
+	query = query.replaceAll('$', '');
+
 	const tagQueryMatches = query.match(/[-|~]?(\w+):(".*?"|[^\s]+)/g);
 
 	const titleMatch = query
@@ -304,7 +331,96 @@ export const parseQuery = (query: string) => {
 	return { ...matches, tagMatches };
 };
 
-export const search = async (
+const parseTitleQuery = (titleMatch: string[]) => {
+	if (titleMatch.length) {
+		let splits = titleMatch.join(' ').split(' ');
+
+		if (config.database.vendor === 'postgresql') {
+			splits = splits
+				.map((s) =>
+					s
+						.replace(/<->|\||&|\(\)|!|#/g, '')
+						.replaceAll("'", '<->')
+						.trim()
+				)
+				.filter((s) => s.length && !['-', '~', '!', '(', ')', '()'].includes(s));
+		}
+
+		const andQueries = splits
+			.filter((s) => !s.startsWith('~') && !s.startsWith('-'))
+			.map((s) =>
+				s
+					.toLowerCase()
+					.replace(/[^ -~]/g, '')
+					.trim()
+			)
+			.filter((s) => s.length);
+		const orQueries = splits
+			.filter((s) => s.startsWith('~'))
+			.map((s) =>
+				s
+					.substring(1)
+					.toLowerCase()
+					.replace(/[^ -~]/g, '')
+					.trim()
+			)
+			.filter((s) => s.length);
+
+		const notQueries = splits
+			.filter((s) => s.startsWith('-'))
+			.map((s) =>
+				s
+					.substring(1)
+					.toLowerCase()
+					.replace(/[^ -~]/g, '')
+					.trim()
+			)
+			.filter((s) => s.length);
+
+		let or = ``;
+		let not = ``;
+
+		if (config.database.vendor === 'postgresql') {
+			const and = andQueries.join(' & ');
+
+			if (orQueries.length) {
+				or = `(${orQueries.join(' | ')})`;
+			}
+
+			if (notQueries.length) {
+				not = `!(${notQueries.join(' & ')})`;
+			}
+
+			if (and.length && or.length) {
+				or = `& ${or}`;
+			}
+
+			if ((and.length || or.length) && not.length) {
+				not = `& ${not}`;
+			}
+
+			return { and, or, not };
+		} else {
+			const and = andQueries.map((s) => `"${s}"`).join(' AND ');
+
+			if (orQueries.length) {
+				or = `(${orQueries.map((s) => `"${s}"`).join(' OR ')})`;
+			}
+
+			if (notQueries.length) {
+				not = `NOT (${notQueries.map((s) => `"${s}"`).join(' AND ')})`;
+			}
+
+			if (and.length && or.length) {
+				or = `AND ${or}`;
+			}
+
+			return { and, or, not };
+		}
+	}
+};
+
+export const searchArchives = async (
 	params: SearchParams,
 	options: QueryOptions
 ): Promise<{ ids: number[]; total: number }> => {
@@ -379,7 +495,7 @@ export const search = async (
 			query = query.where('namespace', '=', namespace);
 		}
 
-		return query.where((eb) => eb('name', like(), name).or('displayName', like(), name)).execute();
+		return query.where((eb) => eb('name', like(), name)).execute();
 	};
 
 	const excludeTags = (
@@ -439,7 +555,7 @@ export const search = async (
 		} else {
 			return db.selectFrom('archives').select(['archives.id']);
 		}
-	})();
+	})() as SelectQueryBuilder<DB, 'archives' | 'archivesFts', { id: number; title: string }>;
 
 	const inclusiveTags = tagMatches.filter((tag) => !tag.or && !tag.negate);
 
@@ -457,7 +573,7 @@ export const search = async (
 							.whereRef('archives.id', '=', 'archiveId')
 							.where((eb) =>
 								tag.namespace === 'tag'
-									? eb('name', like(), tag.name).or('displayName', like(), tag.name)
+									? eb('name', like(), tag.name)
 									: eb('name', like(), tag.name).and('namespace', '=', tag.namespace)
 							)
 					)
@@ -476,61 +592,35 @@ export const search = async (
 		query = query.where('id', 'in', archiveIdsOptional);
 	}
 
-	if (titleMatch.length) {
-		const splits = titleMatch.join(' ').split(' ');
-		const andQueries = splits
-			.filter((s) => !s.startsWith('~') && !s.startsWith('-'))
-			.map((s) => (/\w+-\w+/.test(s) ? `"${s}"` : s));
-		const orQueries = splits
-			.filter((s) => s.startsWith('~'))
-			.map((s) => s.substring(1))
-			.map((s) => (/\w+-\w+/.test(s) ? `"${s}"` : s));
-		const notQueries = splits
-			.filter((s) => s.startsWith('-'))
-			.map((s) => s.substring(1))
-			.map((s) => (/\w+-\w+/.test(s) ? `"${s}"` : s));
+	const parsedTitlteQuery = parseTitleQuery(titleMatch);
 
-		let or = ``;
-		let not = ``;
+	if (parsedTitlteQuery) {
+		const { and, or, not } = parsedTitlteQuery;
 
 		if (config.database.vendor === 'postgresql') {
-			const and = andQueries.join(' & ');
-
-			if (orQueries.length) {
-				or = `(${orQueries.join(' | ')})`;
-			}
-
-			if (notQueries.length) {
-				not = `!(${notQueries.join(' & ')})`;
-			}
-
-			if (and.length && or.length) {
-				or = `& ${or}`;
-			}
-
-			if ((and.length || or.length) && not.length) {
-				not = `& ${not}`;
-			}
-
 			query = query.where('archives.fts', '@@', `${`${and} ${or} ${not}`}`);
 		} else {
-			const and = andQueries.join(' AND ');
+			query = query.innerJoin('archivesFts', `archivesFts.rowid`, 'archives.id');
 
-			if (orQueries.length) {
-				or = `(${orQueries.join(' OR ')})`;
+			if (!and.length && not.length) {
+				if (or.length) {
+					query = query.where((eb) => sql`${eb.table('archivesFts')} = ${or}`);
+				}
+
+				query = query.where((eb) =>
+					eb(
+						'archives.id',
+						'not in',
+						eb
+							.selectFrom('archives')
+							.innerJoin('archivesFts', `archivesFts.rowid`, 'archives.id')
+							.select('id')
+							.where((eb) => sql`${eb.table('archivesFts')} = ${not.replace('NOT', '')}`)
+					)
+				);
+			} else {
+				query = query.where((eb) => sql`${eb.table('archivesFts')} = ${`${and} ${or} ${not}`}`);
 			}
-
-			if (notQueries.length) {
-				not = `NOT (${notQueries.join(' AND ')})`;
-			}
-
-			if (and.length && or.length) {
-				or = `AND ${or}`;
-			}
-
-			query = query
-				.innerJoin('archivesFts', `archivesFts.rowid`, 'archives.id')
-				.where((eb) => sql`${eb.table('archivesFts')} = ${`${and} ${or} ${not}`}`);
 		}
 	}
 
@@ -643,8 +733,12 @@ export const search = async (
 		);
 	}
 
-	if (options.matchIds?.length) {
-		query = query.where('archives.id', 'in', options.matchIds);
+	if (options.matchIds) {
+		if (options.matchIds.length) {
+			query = query.where('archives.id', 'in', options.matchIds);
+		} else {
+			return { ids: [], total: 0 };
+		}
 	}
 
 	if (!options.showHidden) {
@@ -696,7 +790,9 @@ export const search = async (
 	}
 
 	return {
-		ids: allIds.slice((params.page - 1) * params.limit, params.page * params.limit),
+		ids: options.skipPagination
+			? allIds
+			: allIds.slice((params.page - 1) * params.limit, params.page * params.limit),
 		total: allIds.length,
 	};
 };
@@ -722,7 +818,7 @@ export const libraryItems = async (
 				eb
 					.selectFrom('archiveTags')
 					.innerJoin('tags', 'id', 'tagId')
-					.select(['id', 'namespace', 'name', 'displayName'])
+					.select(['namespace', 'name'])
 					.whereRef('archives.id', '=', 'archiveId')
 					.orderBy('archiveTags.createdAt asc')
 			).as('tags'),
@@ -730,7 +826,9 @@ export const libraryItems = async (
 		.where('archives.id', 'in', ids)
 		.execute()) satisfies GalleryListItem[];
 
-	archives = archives.map((archive) => handleTags(archive));
+	if (!options?.skipHandlingTags) {
+		archives = archives.map((archive) => sortArchiveTags(archive));
+	}
 
 	if (options?.sortingIds) {
 		const ids = options.sortingIds;
@@ -742,7 +840,7 @@ export const libraryItems = async (
 };
 
 export const tagList = (): Promise<Tag[]> =>
-	db.selectFrom('tags').select(['id', 'namespace', 'name', 'displayName']).execute();
+	db.selectFrom('tags').select(['namespace', 'name']).execute();
 
 export const getUserBlacklist = async (userId: string) => {
 	const row = await db
@@ -783,3 +881,125 @@ export const userCollections = (userId: string): Promise<Collection[]> =>
 		.groupBy('collection.id')
 		.orderBy('createdAt asc')
 		.execute();
+
+export const searchSeries = async (
+	params: SearchParams,
+	options: QueryOptions
+): Promise<{ ids: number[]; total: number }> => {
+	const { titleMatch } = parseQuery(params.query);
+
+	const sortQuery = (sort: Sort, order: Order) => {
+		switch (sort) {
+			case 'title':
+				return config.database.vendor === 'postgresql'
+					? `series.title ${order}`
+					: sql`series.title collate nocase ${sql.raw(order)}`;
+			case 'created_at':
+				return `series.createdAt ${order}`;
+			default:
+				return `series.updatedAt ${order}`;
+		}
+	};
+
+	const sort = params.sort ?? 'updated_at';
+	const order = params.order ?? 'desc';
+
+	const orderBy = sortQuery(sort, order) as OrderByExpression<DB, 'series', undefined>;
+
+	let ids: number[] = [];
+
+	if (params.query.length) {
+		const archives = await searchArchives(params, {
+			...options,
+			skipPagination: true,
+			showHidden: true,
+		});
+
+		ids = archives.ids;
+	}
+
+	let query = db.selectFrom('series').select(['series.id', 'series.title']);
+
+	if (options.matchIds && !options.matchIds.length) {
+		return { ids: [], total: 0 };
+	}
+
+	const parsedTitlteQuery = parseTitleQuery(titleMatch);
+
+	if (parsedTitlteQuery && config.database.vendor === 'sqlite') {
+		query = query.innerJoin('seriesFts', `seriesFts.rowid`, 'series.id');
+	}
+
+	query = query.where((eb) => {
+		const expressions: Expression<SqlBool>[] = [];
+
+		if (parsedTitlteQuery) {
+			const { and, or, not } = parsedTitlteQuery;
+
+			if (config.database.vendor === 'postgresql') {
+				expressions.push(eb('series.fts', '@@', `${`${and} ${or} ${not}`}`));
+			} else {
+				// @ts-expect-error works
+				expressions.push(sql`${eb.table('seriesFts')} = ${`${and} ${or} ${not}`}`);
+			}
+		}
+
+		if (options.matchIds) {
+			if (options.matchIds.length) {
+				expressions.push(eb('series.id', 'in', options.matchIds));
+			}
+		}
+
+		if (ids.length) {
+			const expression: Expression<SqlBool> = eb.exists(
+				eb
+					.selectFrom('seriesArchive')
+					.select('seriesArchive.seriesId')
+					.whereRef('seriesArchive.seriesId', '=', 'series.id')
+					.where('seriesArchive.archiveId', 'in', ids)
+			);
+
+			if (expressions.length) {
+				return eb.and(expressions).or(expression);
+			} else {
+				return eb.and([expression]);
+			}
+		} else {
+			return eb.and(expressions);
+		}
+	});
+
+	query = query.orderBy([orderBy]);
+
+	let filteredResults = await query.execute();
+
+	if (config.database.vendor === 'sqlite' && sort === 'title') {
+		filteredResults = (filteredResults as { id: number; title: string }[]).toSorted((a, b) =>
+			naturalCompare(a.title.toLowerCase(), b.title.toLowerCase())
+		);
+
+		if (order === 'desc') {
+			filteredResults = filteredResults.toReversed();
+		}
+	}
+
+	let allIds = filteredResults.map(({ id }) => id);
+
+	if (!allIds.length) {
+		return {
+			ids: [],
+			total: allIds.length,
+		};
+	}
+
+	if (sort === 'random' && params.seed) {
+		allIds = shuffle(allIds, params.seed);
+	}
+
+	return {
+		ids: options.skipPagination
+			? allIds
+			: allIds.slice((params.page - 1) * params.limit, params.page * params.limit),
+		total: allIds.length,
+	};
+};

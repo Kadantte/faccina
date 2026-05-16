@@ -1,12 +1,6 @@
 import { z } from 'zod';
-import {
-	createCollectionSchema,
-	editArchiveSchema,
-	editTagsSchema,
-	type Order,
-	type Sort,
-} from './schemas';
-import { searchSchema } from './server/utils';
+import { type Order, type Sort } from './schemas';
+import type { serverSchema } from '~shared/config.schema';
 
 export type TagNamespace =
 	| 'artist'
@@ -19,10 +13,8 @@ export type TagNamespace =
 	| string;
 
 export type Tag = {
-	id: number;
 	namespace: TagNamespace;
 	name: string;
-	displayName: string | null;
 };
 
 export type Image = {
@@ -52,6 +44,10 @@ export type Gallery = {
 	tags: Tag[];
 	images: Image[];
 	sources: Source[];
+	series: {
+		id: number;
+		title: string;
+	}[];
 };
 
 export type Archive = {
@@ -64,13 +60,14 @@ export type Archive = {
 	thumbnail: number;
 	language: string | null;
 	size: number;
+	protected: boolean;
 	createdAt: string;
 	releasedAt: string | null;
 	deletedAt: string | null;
-	protected: boolean;
 	tags: Tag[];
 	images: Image[];
 	sources: Source[];
+	series: { title: string; order: number }[];
 };
 
 export type GalleryListItem = {
@@ -83,148 +80,14 @@ export type GalleryListItem = {
 	deletedAt: string | null;
 };
 
-export const messageSchema = z.discriminatedUnion('action', [
-	z.object({
-		action: z.literal('search_main'),
-		payload: z.object({
-			data: searchSchema,
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('search_favorites'),
-		payload: z.object({
-			data: searchSchema,
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_view'),
-		payload: z.object({
-			archiveId: z.number(),
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_download_server'),
-		payload: z.object({
-			archiveId: z.number(),
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_start_read'),
-		payload: z.object({
-			archiveId: z.number(),
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_read_page'),
-		payload: z.object({
-			pageNumber: z.number(),
-			isLastPage: z.boolean(),
-			archiveId: z.number(),
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_finish_read'),
-		payload: z.object({
-			archiveId: z.number(),
-			userId: z.string().optional(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_update_info'),
-		payload: z.object({
-			archiveId: z.number(),
-			data: editArchiveSchema,
-			userId: z.string(),
-		}),
-	}),
-	z.object({
-		action: z.literal('gallery_update_tags'),
-		payload: z.object({
-			archiveId: z.number(),
-			data: editTagsSchema,
-			userId: z.string(),
-		}),
-	}),
-	z.object({
-		action: z.literal('user_login'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_logout'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_register'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_account_recovery_start'),
-		payload: z.object({ username: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_account_recovery_complete'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_blacklist_update'),
-		payload: z.object({
-			blacklist: z.array(z.string()),
-			userId: z.string(),
-		}),
-	}),
-	z.object({
-		action: z.literal('user_account_update'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('user_account_delete'),
-		payload: z.object({ userId: z.string() }),
-	}),
-	z.object({
-		action: z.literal('collection_create'),
-		payload: z.object({
-			data: createCollectionSchema,
-			userId: z.string(),
-		}),
-	}),
-	z.object({
-		action: z.literal('collection_update'),
-		payload: z.object({
-			data: createCollectionSchema,
-			userId: z.string(),
-		}),
-	}),
-	z.object({
-		action: z.literal('app_navigation'),
-		payload: z
-			.object({
-				from: z
-					.object({
-						params: z.record(z.string(), z.string()).nullable(),
-						route: z.record(z.string().nullable()),
-						url: z.unknown(),
-					})
-					.nullable(),
-				to: z
-					.object({
-						params: z.record(z.string(), z.string()).nullable(),
-						route: z.record(z.string().nullable()),
-						url: z.unknown(),
-					})
-					.nullable(),
-			})
-			.nullable()
-			.catch(null),
-	}),
-]);
-
-export type Message = z.infer<typeof messageSchema>;
+export type SeriesListItem = {
+	id: number;
+	title: string;
+	hash: string | null;
+	thumbnail: number | null;
+	chapterCount: number;
+	tags: Tag[];
+};
 
 export type Collection = {
 	id: number;
@@ -251,31 +114,40 @@ export type HistoryEntry = {
 	archive: Pick<Archive, 'id' | 'title' | 'hash' | 'pages' | 'thumbnail' | 'deletedAt' | 'tags'>;
 };
 
-export type LibraryResponse = {
-	archives: GalleryListItem[];
+export type LibraryResponse<T> = {
+	data: T[];
 	page: number;
 	limit: number;
 	total: number;
 	seed?: string;
 };
 
+export type GalleryLibraryResponse = LibraryResponse<GalleryListItem>;
+
 export type SiteConfig = {
 	name: string;
 	url?: string;
 	enableUsers: boolean;
+	disableRegistration: boolean;
 	enableCollections: boolean;
 	enableReadHistory: boolean;
 	hasMailer: boolean;
 	defaultSort: Sort;
 	defaultOrder: Order;
 	guestDownloads: boolean;
+	guestAccess: boolean;
 	searchPlaceholder: string;
 	defaultPageLimit: number;
 	pageLimits: number[];
 	clientSideDownloads: boolean;
+	imageServer: string;
 	admin: {
 		deleteRequireConfirmation: boolean;
 	};
+	galleryShowAllPreviews: boolean;
+	galleryAutoLoadMorePreviews: boolean;
+	galleryPreviewsCount: number;
+	downloadArchiveExtension: z.infer<typeof serverSchema>['download_archive_extension'];
 };
 
 export const readStatSchema = z.object({
@@ -284,9 +156,9 @@ export const readStatSchema = z.object({
 	pageNumber: z.number(),
 });
 
-export type ReadState = z.infer<typeof readStatSchema>;
+export type ReadStat = z.infer<typeof readStatSchema>;
 
-export type ListPageType = 'main' | 'favorites' | 'collection';
+export type ListPageType = 'main' | 'favorites' | 'collection' | 'series';
 
 export type ImageArchive = {
 	id: number;

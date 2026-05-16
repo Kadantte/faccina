@@ -15,6 +15,7 @@ import { twMerge } from 'tailwind-merge';
 import { z } from 'zod';
 import { ImageSize, TouchLayout } from './models';
 import type { Gallery, Image, Tag } from './types';
+import type { ReaderPreset } from '~shared/config/image.schema';
 import { presetSchema } from '$lib/image-presets';
 
 _slugify.extend({ '.': '-', _: '-', '+': '-' });
@@ -145,6 +146,7 @@ export const getMetadata = (gallery: Gallery, origin: string) => {
 		Pages: gallery.pages,
 		Tags: tags,
 		Source: `${origin}/g/${gallery.id}`,
+		URL: gallery.sources.map((source) => source.url),
 		Released:
 			gallery.releasedAt !== null ? new Date(gallery.releasedAt).getTime() / 1000 : undefined,
 		Thumbnail: gallery.thumbnail - 1,
@@ -330,3 +332,40 @@ export const relativeDate = (date: string) => {
 		return normalized.format('L');
 	}
 };
+
+export const formatLabel = (format: string) => {
+	switch (format) {
+		case 'webp':
+			return 'WebP';
+		case 'jpeg':
+			return 'JPEG';
+		case 'png':
+			return 'PNG';
+		case 'avif':
+			return 'AVIF';
+		case 'jxl':
+			return 'JXL';
+		default:
+			return format;
+	}
+};
+
+export function getImageDimensions(image: Image, preset: ReaderPreset | undefined) {
+	const width = preset?.width ?? image.width!;
+	const height = preset?.width
+		? Math.round((preset?.width * image.height!) / image.width!)
+		: image.height!;
+
+	return { width, height };
+}
+
+export function getImageUrl(
+	page: number,
+	gallery: Gallery,
+	selectedPreset: ReaderPreset | undefined,
+	imageServer: string
+) {
+	return selectedPreset
+		? `${imageServer}/image/${gallery.hash}/${page}?type=${selectedPreset.hash}`
+		: `${imageServer}/image/${gallery.hash}/${page}`;
+}

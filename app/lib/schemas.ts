@@ -100,11 +100,13 @@ export type EditTagsSchema = typeof editTagsSchema;
 export const sortSchema = z.enum([
 	'released_at',
 	'created_at',
+	'updated_at',
 	'title',
 	'pages',
 	'random',
 	'saved_at',
 	'collection_order',
+	'series_order',
 ]);
 
 export type Sort = z.infer<typeof sortSchema>;
@@ -152,3 +154,10 @@ export const userEditSchema = z
 export const userDeleteSchema = z.object({
 	currentPassword: z.string(),
 });
+
+export const createSeriesSchema = z.object({
+	title: z.string().min(1, { message: 'A title for the series is required' }).max(1000),
+	chapters: z.array(z.number()),
+});
+
+export type CreateSeriesSchema = typeof createSeriesSchema;

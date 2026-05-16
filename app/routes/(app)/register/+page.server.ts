@@ -11,6 +11,8 @@ import { registerSchema } from '$lib/schemas';
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!config.site.enableUsers) {
 		error(404, { message: 'Not Found' });
+	} else if (config.site.disableRegistration) {
+		error(400, { message: 'Registration are disabled' });
 	}
 
 	if (locals.user) {
@@ -29,6 +31,11 @@ export const actions: Actions = {
 		if (!config.site.enableUsers) {
 			return fail(400, {
 				message: 'Users are disabled',
+				form,
+			});
+		} else if (config.site.disableRegistration) {
+			return fail(400, {
+				message: 'Registration are disabled',
 				form,
 			});
 		}
@@ -92,13 +99,6 @@ export const actions: Actions = {
 				userId,
 			})
 			.execute();
-
-		event.locals.analytics?.postMessage({
-			action: 'user_register',
-			payload: {
-				userId,
-			},
-		});
 
 		const redirectTo = event.url.searchParams.get('to');
 

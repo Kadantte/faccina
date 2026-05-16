@@ -16,6 +16,8 @@ const parseSourceId = (name: string, id: MultiIdField) => {
 			return `https://hentainexus.com/view/${id}`;
 		case 'koharu':
 			return `https://koharu.to${id}`;
+		case 'schale':
+			return `https://schale.network${id}`;
 	}
 };
 

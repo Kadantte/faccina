@@ -10,6 +10,7 @@
 	import Settings from 'lucide-svelte/icons/settings';
 	import User from 'lucide-svelte/icons/user';
 	import UserCircle from 'lucide-svelte/icons/user-round';
+	import Book from 'lucide-svelte/icons/book';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/stores';
 	import LoginForm from '$lib/components/login-form.svelte';
@@ -31,6 +32,8 @@
 		switch ($page.route.id) {
 			case '/(app)/favorites':
 			case '/(app)/collections/[slug]':
+			case '/(app)/series':
+			case '/(app)/series/[id]':
 				return $page.url.pathname;
 			default:
 				return '/';
@@ -50,6 +53,8 @@
 	$: {
 		$query = $page.url.searchParams.get('q') ?? '';
 	}
+
+	$: shouldAutocomplete = true;
 
 	let selectPosition = -1;
 	let highligtedIndex = -1;
@@ -97,13 +102,12 @@
 				const tagMap = new Map();
 
 				$tagList
-					.filter(({ namespace, name, displayName }) => {
+					.filter(({ namespace, name }) => {
 						return (
 							`${namespace}:${name}`.toLowerCase().includes(value) ||
 							`${namespace}:"${name}"`.toLowerCase().includes(value) ||
 							`${namespace}:${name.replaceAll(' ', '_')}`.toLowerCase().includes(value) ||
-							`${namespace}:"${name.replaceAll(' ', '_')}"`.toLowerCase().includes(value) ||
-							displayName?.toLowerCase().includes(value)
+							`${namespace}:"${name.replaceAll(' ', '_')}"`.toLowerCase().includes(value)
 						);
 					})
 					.forEach((tag) => tagMap.set(`${tag.namespace}:"${tag.name}"`.toLowerCase(), tag));
@@ -209,11 +213,21 @@
 		<Home class="size-6" />
 	</Button>
 
+	<Button
+		class="size-12 rounded-none p-0 text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 hover:dark:text-primary"
+		href="/series"
+		on:click={() => ($query = '')}
+		title="Series"
+		variant="ghost"
+	>
+		<Book class="size-6" />
+	</Button>
+
 	<div class="h-12 w-full flex-1 p-2">
 		<Popover.Root
 			disableFocusTrap={true}
 			onOpenChange={(open) => (popoverOpen = open)}
-			open={!!filteredTags.length && popoverOpen}
+			open={shouldAutocomplete && !!filteredTags.length && popoverOpen}
 			openFocus={inputEl}
 			portal={formEl}
 		>

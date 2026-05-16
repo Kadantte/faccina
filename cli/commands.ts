@@ -1,12 +1,16 @@
 import chalk from 'chalk';
 import { Argument, Command, Option } from 'commander';
+import { version } from '../package.json';
 import * as archive from './archive';
 import * as images from './images';
 import * as metadataCli from './metadata-cli';
 import * as migrate from './migrate';
 import * as users from './users';
+import * as server from './server';
 
 const program = new Command();
+
+program.version(version);
 
 program
 	.command('index')
@@ -57,6 +61,7 @@ program
 	)
 	.option('--reverse', 'Reverse the archive list to generate.')
 	.option('-f --force', 'Do not check if the image already exists.')
+	.option('--skip-thumbnails', 'Do not generate page thumbnail images.')
 	.option('--skip-reader', 'Do not generate images for the reader presets.')
 	.option('--skip-download', 'Do not generate images for the download presets.')
 	.action((options) => images.generateImages(options));
@@ -99,12 +104,37 @@ program
 	.action(() => migrate.migratePresetHash());
 
 program
+	.command('metadata:export')
+	.description(
+		'Export archive metadata to a ZIP file keeping the original content structure.\nOnly archives present in the content directory will be included.'
+	)
+	.addArgument(new Argument('<path>', 'Path to save the ZIP file.'))
+	.addOption(new Option('--exclude-images', 'Exclude images from the export.'))
+	.action((path, { excludeImages }) => metadataCli.exportMetadata(path, { excludeImages }));
+
+program
+	.command('metadata:import')
+	.description('Import the metadata from the export ZIP file. Archives will be updated by ID.')
+	.addArgument(new Argument('<path>', 'Path to the export ZIP file.'))
+	.addOption(
+		new Option('--clean', 'Remove all archive entries from the database before importing.')
+	)
+	.addOption(
+		new Option(
+			'--metadata-only',
+			'Limit to only importing metadata. This will skip importing the ID and updating hash, path, file size and creation date.'
+		)
+	)
+	.action((path, { clean, metadataOnly }) =>
+		metadataCli.importMetadata(path, { clean, metadataOnly })
+	);
+
+program
 	.command('metadata:scrape')
 	.description('Scrape metadata from specified site.')
 	.addArgument(new Argument('<site>', 'Site to scrape metadata from.').choices(['hentag']))
-	.addOption(
-		new Option('--ids <ID ranges>', 'Re-index given archive IDs.').conflicts(['paths', 'fromPath'])
-	)
+	.addOption(new Option('--ids <ID ranges>', 'Scrape given archive ID ranges.'))
+	.addOption(new Option('--paths <paths...>', 'List of paths to limit search to.'))
 	.option(
 		'--sleep <time>',
 		'Indicate how much time in milliseconds to wait between site requests.',
@@ -115,8 +145,36 @@ program
 		'Skip any prompts. If there are multiple results, the most similar one will be chosen.'
 	)
 	.option('-v --verbose', 'Print more logs.')
-	.action((site, { ids, sleep, interaction, verbose }) =>
-		metadataCli.scrape(site, { idRanges: ids, sleep: parseInt(sleep), interaction, verbose })
+	.action((site, { ids, sleep, interaction, verbose, paths }) =>
+		metadataCli.scrape(site, { idRanges: ids, paths, sleep: parseInt(sleep), interaction, verbose })
 	);
+
+program
+	.command('server:heap-snapshot')
+	.description('Takes a heap snapshot from the current running server.')
+	.option('--hostname -h <hostname>', 'Indicate internal server hostname')
+	.option('--port -p <port>', 'Indicate internal server port')
+	.action(({ hostname, port }) => {
+		server.heapSnapshot({ hostname, port });
+	});
+
+program
+	.command('server:heap-stats')
+	.description('Get heap stats from the current running server.')
+	.option('--hostname -h <hostname>', 'Indicate internal server hostname')
+	.option('--port -p <port>', 'Indicate internal server port')
+	.action(({ hostname, port }) => {
+		server.heapStats({ hostname, port });
+	});
+
+program
+	.command('server:run-gc')
+	.description("Trigger Bun's garbage collector on the current running server.")
+	.option('--sync', 'Use this to wait for the garbage collector to finish')
+	.option('--hostname -h <hostname>', 'Indicate internal server hostname')
+	.option('--port -p <port>', 'Indicate internal server port')
+	.action(({ sync, hostname, port }) => {
+		server.runGC({ sync, hostname, port });
+	});
 
 export default program;

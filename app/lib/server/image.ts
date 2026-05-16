@@ -4,11 +4,13 @@ import chalk from 'chalk';
 import StreamZip from 'node-stream-zip';
 import sharp from 'sharp';
 import { match } from 'ts-pattern';
+import imageSize from 'image-size';
 import type { ImageArchive } from '$lib/types';
 import type { Preset } from '$lib/image-presets';
 import config from '~shared/config';
 import db from '~shared/db';
 import { leadingZeros } from '~shared/utils';
+import { imageDirectory } from '~shared/server.utils';
 
 export type ImageEncodingArgs = {
 	archive: ImageArchive;
@@ -44,14 +46,15 @@ export const calculateDimensions = async (args: ImageDimensionsArgs) => {
 			throw new Error('Image not found');
 		}
 
-		const { width, height } = await sharp(args.buffer).metadata();
+		if (args.buffer) {
+			const { width, height } = imageSize(args.buffer);
 
-		if (width && height) {
-			args.dimensions = {
-				width,
-				height,
-			};
-		} else {
+			if (width && height) {
+				args.dimensions = { width, height };
+			}
+		}
+
+		if (!args.dimensions) {
 			return;
 		}
 	}
@@ -88,8 +91,7 @@ export const encodeImage = async (args: ImageEncodingArgs) => {
 	let data: Buffer | Uint8Array;
 
 	const originalImagePath = join(
-		config.directories.images,
-		args.archive.hash,
+		imageDirectory(args.archive.hash),
 		`${leadingZeros(args.archive.pageNumber, args.archive.pages)}${extname(args.archive.filename)}`
 	);
 
@@ -101,6 +103,7 @@ export const encodeImage = async (args: ImageEncodingArgs) => {
 		if (info.isFile()) {
 			const zip = new StreamZip.async({ file: args.archive.path });
 			data = await zip.entryData(image.filename);
+			await zip.close();
 
 			if (config.server.autoUnpack) {
 				Bun.write(originalImagePath, data);
@@ -124,20 +127,23 @@ export const encodeImage = async (args: ImageEncodingArgs) => {
 
 	const preset = args.preset;
 
-	let newHeight: number | undefined = undefined;
+	if (preset.width !== undefined) {
+		let newHeight: number | undefined = undefined;
 
-	if (config.image.aspectRatioSimilar && args.allowAspectRatioSimilar) {
-		const aspectRatio = width! / height!;
+		if (config.image.aspectRatioSimilar && args.allowAspectRatioSimilar) {
+			const aspectRatio = width! / height!;
 
-		if (aspectRatio >= 0.65 && aspectRatio <= 0.75) {
-			newHeight = preset.width * (64 / 45);
+			if (aspectRatio >= 0.65 && aspectRatio <= 0.75) {
+				newHeight = preset.width * (64 / 45);
+			}
 		}
+
+		pipeline = pipeline.resize({
+			width: Math.round(preset.width),
+			height: newHeight ? Math.round(newHeight) : undefined,
+		});
 	}
 
-	pipeline = pipeline.resize({
-		width: Math.round(preset.width),
-		height: newHeight ? Math.round(newHeight) : undefined,
-	});
 	pipeline = match(preset)
 		.with({ format: 'webp' }, (data) => pipeline.webp(data))
 		.with({ format: 'jpeg' }, (data) => pipeline.jpeg(data))
@@ -149,7 +155,9 @@ export const encodeImage = async (args: ImageEncodingArgs) => {
 	const newImage = await pipeline.toBuffer();
 
 	try {
-		await Bun.write(args.savePath, newImage);
+		if (config.image.storeResampledImages) {
+			await Bun.write(args.savePath, newImage);
+		}
 	} catch (err) {
 		console.error(
 			chalk.red(

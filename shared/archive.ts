@@ -1,10 +1,9 @@
 import { rm } from 'node:fs/promises';
 import { Glob } from 'bun';
-import chalk from 'chalk';
 import { sql } from 'kysely';
 import db from '../shared/db';
 import config from './config';
-import type { Image, Source, Tag } from './metadata';
+import type { Image, Series, Source, Tag } from './metadata';
 import { leadingZeros } from './utils';
 
 /**
@@ -12,7 +11,7 @@ import { leadingZeros } from './utils';
  * @param id Archive ID
  * @param archive new archive data
  */
-export const upsertSources = async (id: number, metadataSources: Source[], verbose = false) => {
+export const upsertSources = async (id: number, metadataSources: Source[]) => {
 	metadataSources = metadataSources.map((source) => {
 		const mapping = config.metadata.sourceMapping.findLast(({ match, ignoreCase }) => {
 			const normalizedMatch = ignoreCase ? match.toLowerCase() : match;
@@ -41,54 +40,16 @@ export const upsertSources = async (id: number, metadataSources: Source[], verbo
 		};
 	});
 
-	const archiveSources = await db
-		.selectFrom('archiveSources')
-		.select(['name', 'url'])
-		.where('archiveId', '=', id)
-		.execute();
+	await db.deleteFrom('archiveSources').where('archiveId', '=', id).execute();
 
-	const relationDelete = archiveSources.filter(
-		(relation) =>
-			!metadataSources.some(
-				(source) => source.name === relation.name && source.url === relation.url
-			)
-	);
-
-	for (const relation of relationDelete) {
-		await db
-			.deleteFrom('archiveSources')
-			.where('name', '=', relation.name)
-			.where('url', '=', relation.url)
-			.execute();
-	}
-
-	const relationInsert = metadataSources.filter(
-		(source) =>
-			!archiveSources.some(
-				(relation) => relation.name === source.name && relation.url === source.url
-			)
-	);
-
-	for (const source of relationInsert) {
+	for (const source of metadataSources) {
 		if (!source.name) {
-			if (verbose) {
-				console.info(
-					chalk.yellow(
-						`${chalk.bold(`[ID: ${id}]`)} Couldn't get a name for the source with URL ${chalk.bold(source.url)}\n`
-					)
-				);
-			}
-
 			continue;
 		}
 
 		await db
 			.insertInto('archiveSources')
-			.values({
-				name: source.name,
-				url: source.url,
-				archiveId: id,
-			})
+			.values({ name: source.name, url: source.url, archiveId: id })
 			.execute();
 	}
 };
@@ -111,10 +72,7 @@ export const upsertImages = async (id: number, images: Image[], hash: string) =>
 		const newImage = images.find((_image) => _image.pageNumber === image.pageNumber);
 
 		if (newImage && newImage.filename !== image.filename) {
-			diff.push({
-				filename: image.filename,
-				pageNumber: image.pageNumber,
-			});
+			diff.push({ filename: image.filename, pageNumber: image.pageNumber });
 		}
 	}
 
@@ -184,11 +142,21 @@ export const upsertImages = async (id: number, images: Image[], hash: string) =>
  */
 export const upsertTags = async (id: number, metadataTags: Tag[]) => {
 	metadataTags = metadataTags.map(({ namespace, name }) => ({
-		namespace: namespace.length ? namespace : 'tag',
+		namespace: namespace.length ? namespace.toLowerCase() : 'tag',
 		name,
 	}));
 
-	metadataTags = metadataTags.map((tag) => {
+	let uniqueTags: Tag[] = [];
+
+	for (const tag of metadataTags) {
+		if (uniqueTags.find((t) => t.namespace === tag.namespace && t.name === tag.name)) {
+			continue;
+		}
+
+		uniqueTags.push(tag);
+	}
+
+	uniqueTags = uniqueTags.map((tag) => {
 		const mapping = config.metadata.tagMapping.findLast(({ ignoreCase, match, matchNamespace }) => {
 			const normalizedTagName = ignoreCase ? tag.name.toLowerCase() : tag.name;
 			const normalizedMatches = ignoreCase ? match.map((t) => t.toLowerCase()) : match;
@@ -201,24 +169,26 @@ export const upsertTags = async (id: number, metadataTags: Tag[]) => {
 		});
 
 		return {
-			namespace: mapping?.namespace?.length ? mapping.namespace : tag.namespace,
+			namespace: mapping?.namespace?.length
+				? mapping.namespace.toLowerCase()
+				: tag.namespace.toLowerCase(),
 			name: mapping?.name ?? tag.name,
 		};
 	});
 
-	const tags = metadataTags.length
+	const tags = uniqueTags.length
 		? await db
 				.selectFrom('tags')
 				.select(['id', 'namespace', 'name'])
 				.where(
 					sql`namespace || ':' || name`,
 					'in',
-					metadataTags.map(({ namespace, name }) => `${namespace}:${name}`)
+					uniqueTags.map(({ namespace, name }) => `${namespace}:${name}`)
 				)
 				.execute()
 		: [];
 
-	const tagsInsert = metadataTags.filter(
+	const tagsInsert = uniqueTags.filter(
 		(tag) => !tags.some((_tag) => _tag.namespace === tag.namespace && _tag.name === tag.name)
 	);
 
@@ -247,9 +217,7 @@ export const upsertTags = async (id: number, metadataTags: Tag[]) => {
 
 	const relationDelete = archiveTags.filter(
 		(relation) =>
-			!metadataTags.some(
-				(tag) => tag.name === relation.name && tag.namespace === relation.namespace
-			)
+			!uniqueTags.some((tag) => tag.name === relation.name && tag.namespace === relation.namespace)
 	);
 
 	for (const relation of relationDelete) {
@@ -260,7 +228,7 @@ export const upsertTags = async (id: number, metadataTags: Tag[]) => {
 			.execute();
 	}
 
-	const relationInsert = metadataTags.filter(
+	const relationInsert = uniqueTags.filter(
 		(tag) =>
 			!archiveTags.some(
 				(relation) => relation.name === tag.name && relation.namespace === tag.namespace
@@ -271,13 +239,82 @@ export const upsertTags = async (id: number, metadataTags: Tag[]) => {
 		tagId: tags.find((_tag) => _tag.namespace === tag.namespace && _tag.name === tag.name)!.id,
 	}));
 
-	if (relationIdsInsert?.length) {
+	if (relationIdsInsert.length) {
 		await db
 			.insertInto('archiveTags')
 			.values(
 				relationIdsInsert.map(({ tagId }) => ({
 					archiveId: id,
 					tagId,
+				}))
+			)
+			.execute();
+	}
+};
+
+export const upsertSeries = async (id: number, seriesList: Series[]) => {
+	const existingSeries = seriesList.length
+		? await db
+				.selectFrom('series')
+				.select(['id', 'title'])
+				.where(
+					'title',
+					'in',
+					seriesList.map((series) => series.title)
+				)
+				.execute()
+		: [];
+
+	const seriesInsert = seriesList.filter(
+		(series) => !existingSeries.some((_series) => _series.title === series.title)
+	);
+
+	if (seriesInsert.length) {
+		const inserted = await db
+			.insertInto('series')
+			.values(seriesInsert.map((series) => ({ title: series.title })))
+			.returning(['id', 'title'])
+			.execute();
+
+		existingSeries.push(...inserted);
+	}
+
+	const seriesArchive = await db
+		.selectFrom('seriesArchive')
+		.innerJoin('series', 'series.id', 'seriesArchive.seriesId')
+		.select(['seriesId', 'series.title'])
+		.where('archiveId', '=', id)
+		.execute();
+
+	const relationDelete = seriesArchive.filter(
+		(relation) => !seriesList.some((series) => series.title === relation.title)
+	);
+
+	for (const relation of relationDelete) {
+		await db
+			.deleteFrom('seriesArchive')
+			.where('archiveId', '=', id)
+			.where('seriesId', '=', relation.seriesId)
+			.execute();
+	}
+
+	const relationInsert = seriesList.filter(
+		(series) => !seriesArchive.some((relation) => relation.title === series.title)
+	);
+
+	const relationIdsInsert = relationInsert.map((series) => ({
+		seriesId: existingSeries.find((_series) => _series.title === series.title)!.id,
+		order: seriesList.find((_series) => _series.title === series.title)!.order,
+	}));
+
+	if (relationIdsInsert.length) {
+		await db
+			.insertInto('seriesArchive')
+			.values(
+				relationIdsInsert.map(({ seriesId, order }) => ({
+					seriesId,
+					archiveId: id,
+					order,
 				}))
 			)
 			.execute();

@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { rename, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, extname, join, parse } from 'node:path';
 import { Glob, sleep } from 'bun';
 import chalk from 'chalk';
@@ -8,11 +8,11 @@ import { filetypemime } from 'magic-bytes.js';
 import naturalCompare from 'natural-compare-lite';
 import StreamZip from 'node-stream-zip';
 import slugify from 'slugify';
-import { upsertImages, upsertSources, upsertTags } from '../shared/archive';
+import { upsertImages, upsertSeries, upsertSources, upsertTags } from '../shared/archive';
 import config from '../shared/config';
 import { now } from '../shared/db/helpers';
 import type { ArchiveMetadata, Image } from '../shared/metadata';
-import { exists } from '../shared/server-utils';
+import { exists, imageDirectory } from '../shared/server.utils';
 import { leadingZeros } from '../shared/utils';
 import {
 	addEmbeddedDirMetadata,
@@ -22,7 +22,8 @@ import {
 	MetadataSchema,
 } from './metadata';
 import { parseFilename } from './metadata/utils';
-import { directorySize, queryIdRanges, readStream } from './utilts';
+import { directorySize, queryIdRanges } from './utilts';
+import { readStream } from '$lib/server/utils';
 
 slugify.extend({ '.': '-', _: '-', '+': '-' });
 
@@ -79,9 +80,9 @@ export const indexArchives = async (opts: IndexOptions) => {
 			}
 
 			if (info.isDirectory()) {
-				indexScans.push({ type: 'metadata', path: archive.path });
+				indexScans = indexScans.concat({ type: 'metadata', path: archive.path });
 			} else if (info.isFile()) {
-				indexScans.push({ type: 'archive', path: archive.path });
+				indexScans = indexScans.concat({ type: 'archive', path: archive.path });
 			}
 		}
 	} else {
@@ -120,35 +121,37 @@ export const indexArchives = async (opts: IndexOptions) => {
 				const archiveMatches: ArchiveScan[] = Array.from(
 					glob.scanSync({ cwd: path, absolute: true, followSymlinks: true, onlyFiles: true })
 				).map((path) => ({ type: 'archive', path }));
-				indexScans.push(...archiveMatches);
+				indexScans = indexScans.concat(archiveMatches);
 
 				// Match metadata files
 				const metadataGlob = new Glob(
 					opts.recursive
-						? '**/{info.{json,yml,yaml},ComicInfo.xml,booru.txt}'
-						: '*/{info.{json,yml,yaml},ComicInfo.xml,booru.txt}'
+						? '**/{info.{json,yml,yaml},ComicInfo.xml,booru.txt,.faccina}'
+						: '*/{info.{json,yml,yaml},ComicInfo.xml,booru.txt,.faccina}'
 				);
 				const metadataMatches: MetadataScan[] = Array.from(
 					metadataGlob.scanSync({
 						cwd: path,
 						absolute: true,
 						followSymlinks: true,
+						dot: true,
 					})
 				)
 					.filter((path) => Array.from(imageGlob.scanSync({ cwd: dirname(path) })).length)
 					.map((path) => ({ type: 'metadata', path: dirname(path), metadata: path }));
-				indexScans.push(...metadataMatches);
+				indexScans = indexScans.concat(metadataMatches);
 
 				const rootMetadataMatches = Array.from(
-					new Glob(`{info.{json,yml,yaml},ComicInfo.xml,booru.txt}`).scanSync({
+					new Glob(`{info.{json,yml,yaml},ComicInfo.xml,booru.txt,.faccina}`).scanSync({
 						cwd: path,
 						absolute: true,
 						followSymlinks: true,
+						dot: true,
 					})
 				);
 
-				indexScans.push(
-					...rootMetadataMatches
+				indexScans = indexScans.concat(
+					rootMetadataMatches
 						.filter((path) => Array.from(imageGlob.scanSync({ cwd: dirname(path) })).length)
 						.map(
 							(path) =>
@@ -156,7 +159,7 @@ export const indexArchives = async (opts: IndexOptions) => {
 						)
 				);
 			} else if (info.isFile()) {
-				indexScans.push({ type: 'archive', path });
+				indexScans = indexScans.concat({ type: 'archive', path });
 			}
 		}
 
@@ -303,7 +306,11 @@ export const indexArchives = async (opts: IndexOptions) => {
 		const filename = parse(scan.path).name;
 
 		try {
-			const externalResult = await addExternalMetadata(scan, archive).catch((error) => {
+			const externalResult = await addExternalMetadata(
+				scan,
+				archive,
+				opts.verbose ? multibar : null
+			).catch((error) => {
 				if (opts.verbose) {
 					multibar.log(
 						chalk.yellow(
@@ -327,7 +334,11 @@ export const indexArchives = async (opts: IndexOptions) => {
 				if (scan.type === 'archive') {
 					const zip = new StreamZip.async({ file: scan.path });
 
-					const embeddedResult = await addEmbeddedZipMetadata(zip, archive).catch((error) => {
+					const embeddedResult = await addEmbeddedZipMetadata(
+						zip,
+						archive,
+						opts.verbose ? multibar : null
+					).catch((error) => {
 						if (opts.verbose) {
 							multibar.log(
 								chalk.yellow(
@@ -339,6 +350,8 @@ export const indexArchives = async (opts: IndexOptions) => {
 						return null;
 					});
 
+					await zip.close();
+
 					if (embeddedResult) {
 						[archive, [metadataSchema, metadataFormat]] = embeddedResult;
 
@@ -349,7 +362,11 @@ export const indexArchives = async (opts: IndexOptions) => {
 						}
 					}
 				} else {
-					const embeddedResult = await addEmbeddedDirMetadata(scan, archive).catch((error) => {
+					const embeddedResult = await addEmbeddedDirMetadata(
+						scan,
+						archive,
+						opts.verbose ? multibar : null
+					).catch((error) => {
 						if (opts.verbose) {
 							multibar.log(
 								chalk.yellow(
@@ -380,24 +397,26 @@ export const indexArchives = async (opts: IndexOptions) => {
 					if (title) {
 						archive.title = title ?? filename;
 
-						archive.tags = [];
+						if (!archive.tags) {
+							archive.tags = [];
 
-						if (artists) {
-							archive.tags.push(
-								...artists.map((tag) => ({
-									namespace: 'artist',
-									name: tag,
-								}))
-							);
-						}
+							if (artists) {
+								archive.tags.push(
+									...artists.map((tag) => ({
+										namespace: 'artist',
+										name: tag,
+									}))
+								);
+							}
 
-						if (circles) {
-							archive.tags.push(
-								...circles.map((tag) => ({
-									namespace: 'circle',
-									name: tag,
-								}))
-							);
+							if (circles) {
+								archive.tags.push(
+									...circles.map((tag) => ({
+										namespace: 'circle',
+										name: tag,
+									}))
+								);
+							}
 						}
 					}
 				} else {
@@ -416,6 +435,7 @@ export const indexArchives = async (opts: IndexOptions) => {
 						filename,
 						pageNumber: i + 1,
 					}));
+				await zip.close();
 			} else {
 				images = Array.from(imageGlob.scanSync({ cwd: scan.path, followSymlinks: true }))
 					.sort(naturalCompare)
@@ -442,6 +462,12 @@ export const indexArchives = async (opts: IndexOptions) => {
 					.toSorted((a, b) => {
 						const indexA = archive.imageOrder!.findIndex((image) => image.filename === a.filename);
 						const indexB = archive.imageOrder!.findIndex((image) => image.filename === b.filename);
+
+						if (indexA === -1) {
+							return 1;
+						} else if (indexB === -1) {
+							return -1;
+						}
 
 						return indexA - indexB;
 					})
@@ -503,9 +529,23 @@ export const indexArchives = async (opts: IndexOptions) => {
 					id = update.id;
 				}
 
+				if (archive.thumbnail !== undefined) {
+					try {
+						const imagePath = join(
+							imageDirectory(hash),
+							'_meta',
+							`${leadingZeros(archive.thumbnail, images.length)}.png`
+						);
+
+						await rm(imagePath, { force: true });
+					} catch {
+						/* empty */
+					}
+				}
+
 				const moveImages = async () => {
-					const sourcePath = join(config.directories.images, existingPath.hash);
-					const destinationPath = join(config.directories.images, hash);
+					const sourcePath = imageDirectory(existingPath.hash);
+					const destinationPath = imageDirectory(hash);
 
 					if (!(await exists(sourcePath))) {
 						if (opts.verbose) {
@@ -526,6 +566,7 @@ export const indexArchives = async (opts: IndexOptions) => {
 					}
 
 					try {
+						await mkdir(dirname(destinationPath), { recursive: true }).catch(() => {});
 						await rename(sourcePath, destinationPath);
 					} catch (error) {
 						multibar.log(
@@ -566,7 +607,11 @@ export const indexArchives = async (opts: IndexOptions) => {
 				}
 
 				if (archive.sources) {
-					await upsertSources(id, archive.sources, opts.verbose);
+					await upsertSources(id, archive.sources);
+				}
+
+				if (archive.series) {
+					await upsertSeries(id, archive.series);
 				}
 			}
 
@@ -586,16 +631,15 @@ export const indexArchives = async (opts: IndexOptions) => {
 
 				for (const image of images) {
 					const imagePath = join(
-						config.directories.images,
-						hash,
+						imageDirectory(hash),
 						`${leadingZeros(image.pageNumber, images.length)}${extname(image.filename)}`
 					);
 
-					let data: Buffer;
+					const data = await zip.entryData(image.filename);
+
+					await zip.close();
 
 					if (await exists(imagePath)) {
-						data = await zip.entryData(image.filename);
-
 						const hasher = new Bun.CryptoHasher('sha256');
 						const newImageHash = hasher.update(data).digest('hex').substring(0, 16);
 
@@ -610,8 +654,6 @@ export const indexArchives = async (opts: IndexOptions) => {
 							skipped++;
 							continue;
 						}
-					} else {
-						data = await zip.entryData(image.filename);
 					}
 
 					await Bun.write(imagePath, data);

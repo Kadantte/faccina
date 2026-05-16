@@ -1,14 +1,16 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { superValidate } from 'sveltekit-superforms';
 import { zod } from 'sveltekit-superforms/adapters';
-import { handleTags } from '$lib/server/utils';
+import { sortArchiveTags } from '$lib/server/utils';
 import { createCollectionSchema } from '$lib/schemas';
 import config from '~shared/config';
 import db from '~shared/db';
 import { jsonArrayFrom, now } from '~shared/db/helpers';
 
 export const load = async ({ params, locals }) => {
-	if (!locals.user || !config.site.enableCollections) {
+	if (!locals.user) {
+		redirect(301, `/login?to=/collections/${params.slug}/edit`);
+	} else if (!config.site.enableCollections) {
 		redirect(301, '/');
 	}
 
@@ -36,7 +38,7 @@ export const load = async ({ params, locals }) => {
 							eb
 								.selectFrom('archiveTags')
 								.innerJoin('tags', 'tags.id', 'tagId')
-								.select(['tags.id', 'tags.namespace', 'tags.name', 'tags.displayName'])
+								.select(['tags.namespace', 'tags.name'])
 								.whereRef('archives.id', '=', 'archiveId')
 								.orderBy('archiveTags.createdAt asc')
 						).as('tags'),
@@ -59,7 +61,7 @@ export const load = async ({ params, locals }) => {
 		});
 	}
 
-	collection.archives = collection.archives.map(handleTags);
+	collection.archives = collection.archives.map(sortArchiveTags);
 
 	return {
 		collection,
@@ -160,14 +162,6 @@ export const actions = {
 				)
 				.execute();
 		}
-
-		event.locals.analytics?.postMessage({
-			action: 'collection_update',
-			payload: {
-				data: form.data,
-				userId: event.locals.user.id,
-			},
-		});
 
 		return {
 			form,

@@ -1,14 +1,15 @@
 import { error } from '@sveltejs/kit';
-import contentDisposition from 'content-disposition';
 import { strToU8, Zip, ZipPassThrough } from 'fflate';
-import { getMetadata } from '$lib/utils';
 import { getGallery } from '$lib/server/db/queries';
+import { getMetadata } from '$lib/utils';
 import config from '~shared/config';
 import { generateFilename } from '~shared/utils';
 
 export const GET = async ({ params, locals, fetch, setHeaders }) => {
 	if (!config.site.guestDownloads && !locals.user) {
-		error(400, { message: 'Guest downloads are disabled' });
+		error(401, { message: 'Guest downloads are disabled' });
+	} else if (!locals.user && !config.site.guestAccess) {
+		throw error(404, { message: 'Not found', status: 404 });
 	}
 
 	const id = parseInt(params.id);
@@ -25,17 +26,7 @@ export const GET = async ({ params, locals, fetch, setHeaders }) => {
 
 	setHeaders({
 		'Content-Type': 'application/zip',
-		'Content-Disposition': contentDisposition(
-			generateFilename(gallery.title, gallery.tags) + '.cbz'
-		),
-	});
-
-	locals.analytics?.postMessage({
-		action: 'gallery_download_server',
-		payload: {
-			archiveId: gallery.id,
-			userId: locals.user?.id,
-		},
+		'Content-Disposition': `attachment;filename=${encodeURIComponent(generateFilename(gallery.title, gallery.tags))}.${config.server.downloadArchiveExtension}`,
 	});
 
 	const zip = new Zip();
